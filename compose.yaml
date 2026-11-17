@@ -1,0 +1,33 @@
+# 로컬 개발용. 운영 값이 아니다.
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: billing
+      MYSQL_USER: billing
+      MYSQL_PASSWORD: billing-local
+      MYSQL_ROOT_PASSWORD: root-local
+      TZ: Asia/Seoul
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot-local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mysql-data:
