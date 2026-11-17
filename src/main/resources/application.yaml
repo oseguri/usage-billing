@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: billing
+  datasource:
+    url: jdbc:mysql://localhost:3306/billing?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: billing
+    password: billing-local
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
