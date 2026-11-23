@@ -1,0 +1,5 @@
+#!/bin/sh
+./gradlew spotlessCheck -q || {
+  echo "포맷이 어긋났습니다. ./gradlew spotlessApply 를 실행하세요."
+  exit 1
+}
