@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -58,10 +57,20 @@ public class LedgerServiceIntegrationTest {
         String idempotencyKey = "test-" + UUID.randomUUID();
         long delta = usageBefore + 1;
         // 3. EXTERNAL delta, USAGE -delta 거래를 기록한다
-        UncategorizedSQLException e = assertThrows(UncategorizedSQLException.class, () -> ledgerService.record(TxType.TOPUP, idempotencyKey, List.of(new LedgerLine(external, delta), new LedgerLine(usage, -delta))));
+        InsufficientBalanceException e = assertThrows(
+                InsufficientBalanceException.class,
+                () -> ledgerService.record(
+                        TxType.TOPUP,
+                        idempotencyKey,
+                        List.of(
+                                new LedgerLine(external, delta),
+                                new LedgerLine(usage, -delta)
+                        )
+                )
+        );
 
         // 4. 확인한다
-        assertTrue(e.getMessage().contains("chk_account_balance_non_negative"));
+        assertEquals(usage, e.getAccountId());
         assertEquals(0, queryLong("SELECT COUNT(*) FROM ledger_tx WHERE idempotency_key = ?", idempotencyKey));
         assertEquals(externalBefore, balance(external));
         assertEquals(usageBefore, balance(usage));
