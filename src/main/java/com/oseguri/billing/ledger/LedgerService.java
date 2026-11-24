@@ -1,9 +1,8 @@
 package com.oseguri.billing.ledger;
 
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @Service
 public class LedgerService {
@@ -22,7 +21,8 @@ public class LedgerService {
         for (LedgerLine line : lines) {
             int updatedNum = ledgerRepository.updateAccountBalance(line);
             if (updatedNum != 1) {
-                throw new IllegalStateException("account_balance에 줄이 없습니다. accountId: " + line.accountId());
+                throw new IllegalStateException(
+                        "account_balance에 줄이 없습니다. accountId: " + line.accountId());
             }
         }
         return txId;
@@ -38,7 +38,8 @@ public class LedgerService {
         for (LedgerLine line : lines) {
             total = Math.addExact(total, line.amountMicros());
             if (line.amountMicros() == 0L) {
-                throw new IllegalArgumentException("Ledger amount가 0 입니다. account_id: " + line.accountId());
+                throw new IllegalArgumentException(
+                        "Ledger amount가 0 입니다. account_id: " + line.accountId());
             }
         }
 
@@ -47,4 +48,3 @@ public class LedgerService {
         }
     }
 }
-
