@@ -81,6 +81,41 @@ public class LedgerServiceIntegrationTest {
         assertEquals(usageBefore, balance(usage));
     }
 
+    @Test
+    void 같은_멱등_키로_두_번_기록하면_기록을_생략하고_반환한다() {
+        // 1. EXTERNAL, USAGE 계정 번호를 조회한다
+        long external = systemAccountId("EXTERNAL");
+        long usage = systemAccountId("USAGE");
+
+        // 2. 기록 전 두 계정의 잔액을 읽어 둔다
+        long externalBefore = balance(external);
+        long usageBefore = balance(usage);
+
+        String idempotencyKey = "test-" + UUID.randomUUID();
+        // 3. EXTERNAL -1000, USAGE +1000 거래를 기록한다
+        long txId =
+                ledgerService.record(
+                        TxType.TOPUP,
+                        idempotencyKey,
+                        List.of(new LedgerLine(external, -1000L), new LedgerLine(usage, 1000L)));
+
+        long txId2 =
+                ledgerService.record(
+                        TxType.TOPUP,
+                        idempotencyKey,
+                        List.of(new LedgerLine(external, -1000L), new LedgerLine(usage, 1000L)));
+
+        // 4. 확인한다
+        assertEquals(
+                1,
+                queryLong(
+                        "SELECT COUNT(*) FROM ledger_tx WHERE idempotency_key = ?",
+                        idempotencyKey));
+        assertEquals(txId, txId2);
+        assertEquals(externalBefore - 1000, balance(external));
+        assertEquals(usageBefore + 1000, balance(usage));
+    }
+
     private long balance(long accountId) {
         return queryLong(
                 "SELECT balance_micros FROM account_balance WHERE account_id = ?", accountId);
