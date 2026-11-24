@@ -48,4 +48,21 @@ class LedgerServiceTest {
 
         assertTrue(e.getMessage().contains("2개 이상"));
     }
+
+    @Test
+    void 같은_계정이_두_줄에_나오면_거부한다() {
+        // 합이 0이고 0인 줄도 없어서 다른 검사에는 걸리지 않는다
+        List<LedgerLine> lines =
+                List.of(
+                        new LedgerLine(1L, -1000L),
+                        new LedgerLine(2L, 600L),
+                        new LedgerLine(2L, 400L));
+
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> service.record(TxType.TOPUP, "key-1", lines));
+
+        assertTrue(e.getMessage().contains("계정번호가 겹칩니다: 2"));
+    }
 }
