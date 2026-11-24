@@ -1,6 +1,7 @@
 package com.oseguri.billing.ledger;
 
 import java.util.List;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,7 +17,12 @@ public class LedgerService {
     @Transactional
     public long record(TxType txType, String idempotencyKey, List<LedgerLine> lines) {
         checkLines(lines);
-        long txId = ledgerRepository.insertLedgerTx(txType, idempotencyKey);
+        long txId;
+        try {
+            txId = ledgerRepository.insertLedgerTx(txType, idempotencyKey);
+        } catch (DuplicateKeyException e) {
+            return ledgerRepository.findLedgerTxId(txType, idempotencyKey);
+        }
         ledgerRepository.insertLedgerEntries(txId, lines);
         for (LedgerLine line : lines) {
             int updatedNum = ledgerRepository.updateAccountBalance(line);

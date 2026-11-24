@@ -67,4 +67,13 @@ public class LedgerRepository {
             throw e;
         }
     }
+
+    public long findLedgerTxId(TxType txType, String idempotencyKey) {
+        return Objects.requireNonNull(
+                jdbcTemplate.queryForObject(
+                        "SELECT id FROM ledger_tx WHERE tx_type = ? AND idempotency_key = ?",
+                        Long.class,
+                        txType.name(),
+                        idempotencyKey));
+    }
 }
