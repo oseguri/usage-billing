@@ -3,8 +3,10 @@ package com.oseguri.billing.ledger;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.oseguri.billing.TestcontainersConfiguration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -114,6 +116,61 @@ public class LedgerServiceIntegrationTest {
         assertEquals(txId, txId2);
         assertEquals(externalBefore - 1000, balance(external));
         assertEquals(usageBefore + 1000, balance(usage));
+    }
+
+    @Test
+    void 두_스레드가_반대_순서로_거래를_업데이트해도_실패하지_않는다() throws Exception {
+        long external = systemAccountId("EXTERNAL");
+        long usage = systemAccountId("USAGE");
+        long externalBefore = balance(external);
+        long usageBefore = balance(usage);
+        List<LedgerLine> lines =
+                List.of(new LedgerLine(external, -1000), new LedgerLine(usage, 1000));
+        List<LedgerLine> reversed = new ArrayList<>(lines).reversed();
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        List<Throwable> failures = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < 50; i++) {
+                CountDownLatch start = new CountDownLatch(1);
+
+                Future<Void> first =
+                        pool.submit(() -> {
+                            start.await();
+                            ledgerService.record(
+                                    TxType.TOPUP, String.valueOf(UUID.randomUUID()), lines);
+                            return null;
+                        });
+
+                Future<Void> second =
+                        pool.submit(() -> {
+                            start.await();
+                            ledgerService.record(
+                                    TxType.TOPUP, String.valueOf(UUID.randomUUID()), reversed);
+                            return null;
+                        });
+
+                start.countDown();
+
+                for (Future<Void> future : List.of(first, second)) {
+                    try {
+                        future.get(10, TimeUnit.SECONDS);
+                    } catch (ExecutionException e) {
+                        failures.add(e.getCause());
+                    }
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        long externalAfter = balance(external);
+        long usageAfter = balance(usage);
+
+        assertEquals(List.of(), failures);
+        assertEquals(externalBefore - 100000, externalAfter);
+        assertEquals(usageBefore + 100000, usageAfter);
     }
 
     private long balance(long accountId) {

@@ -1,6 +1,9 @@
 package com.oseguri.billing.ledger;
 
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,7 +27,8 @@ public class LedgerService {
             return ledgerRepository.findLedgerTxId(txType, idempotencyKey);
         }
         ledgerRepository.insertLedgerEntries(txId, lines);
-        for (LedgerLine line : lines) {
+        List<LedgerLine> sorted = sortLines(lines);
+        for (LedgerLine line : sorted) {
             int updatedNum = ledgerRepository.updateAccountBalance(line);
             if (updatedNum != 1) {
                 throw new IllegalStateException(
@@ -39,18 +43,28 @@ public class LedgerService {
             throw new IllegalArgumentException("LedgerLine은 2개 이상이어야 합니다. 현재 개수: " + lines.size());
         }
 
+        Set<Long> seen = new HashSet<>();
         long total = 0;
 
         for (LedgerLine line : lines) {
-            total = Math.addExact(total, line.amountMicros());
+            if (!seen.add(line.accountId())) {
+                throw new IllegalArgumentException("계정번호가 겹칩니다: " + line.accountId());
+            }
+
             if (line.amountMicros() == 0L) {
                 throw new IllegalArgumentException(
                         "Ledger amount가 0 입니다. account_id: " + line.accountId());
             }
+
+            total = Math.addExact(total, line.amountMicros());
         }
 
         if (total != 0) {
             throw new IllegalArgumentException("합이 0이 아닙니다. 합: " + total);
         }
+    }
+
+    private List<LedgerLine> sortLines(List<LedgerLine> lines) {
+        return lines.stream().sorted(Comparator.comparingLong(LedgerLine::accountId)).toList();
     }
 }
