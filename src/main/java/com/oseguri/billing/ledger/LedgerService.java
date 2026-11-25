@@ -19,6 +19,9 @@ public class LedgerService {
 
     @Transactional
     public long record(TxType txType, String idempotencyKey, List<LedgerLine> lines) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("잘못된 멱등키 입니다. 멱등 키 : [" + idempotencyKey + "]");
+        }
         checkLines(lines);
         long txId;
         try {
