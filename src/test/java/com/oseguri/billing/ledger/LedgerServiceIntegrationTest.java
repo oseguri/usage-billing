@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.*;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,23 +22,22 @@ public class LedgerServiceIntegrationTest {
 
     @Autowired JdbcTemplate jdbcTemplate;
 
+    private long external;
+    private long usage;
+    private long externalBefore;
+    private long usageBefore;
+
+    @BeforeEach
+    void setup() {
+        external = systemAccountId("EXTERNAL");
+        usage = systemAccountId("USAGE");
+        externalBefore = balance(external);
+        usageBefore = balance(usage);
+    }
+
     @Test
     void 거래를_기록하면_원장과_잔액에_반영된다() {
-        // 1. EXTERNAL, USAGE 계정 번호를 조회한다
-        long external = systemAccountId("EXTERNAL");
-        long usage = systemAccountId("USAGE");
-
-        // 2. 기록 전 두 계정의 잔액을 읽어 둔다
-        long externalBefore = balance(external);
-        long usageBefore = balance(usage);
-
-        String idempotencyKey = "test-" + UUID.randomUUID();
-        // 3. EXTERNAL -1000, USAGE +1000 거래를 기록한다
-        long txId =
-                ledgerService.record(
-                        TxType.TOPUP,
-                        idempotencyKey,
-                        List.of(new LedgerLine(external, -1000L), new LedgerLine(usage, 1000L)));
+        long txId = ledgerService.record(TxType.TOPUP, newKey(), externalToUsage(1_000L));
 
         // 4. 확인한다
         assertEquals(1, queryLong("SELECT COUNT(*) FROM ledger_tx WHERE id = ?", txId));
@@ -50,104 +50,62 @@ public class LedgerServiceIntegrationTest {
 
     @Test
     void 음수가_허용되지_않는_계정이_음수가_되면_ROLLBACK() {
-        // 1. EXTERNAL, USAGE 계정 번호를 조회한다
-        long external = systemAccountId("EXTERNAL");
-        long usage = systemAccountId("USAGE");
+        String idempotencyKey = newKey();
 
-        // 2. 기록 전 두 계정의 잔액을 읽어 둔다
-        long externalBefore = balance(external);
-        long usageBefore = balance(usage);
-
-        String idempotencyKey = "test-" + UUID.randomUUID();
         long delta = usageBefore + 1;
-        // 3. EXTERNAL delta, USAGE -delta 거래를 기록한다
+        List<LedgerLine> lines =
+                List.of(new LedgerLine(external, delta), new LedgerLine(usage, -delta));
+
         InsufficientBalanceException e =
                 assertThrows(
                         InsufficientBalanceException.class,
-                        () ->
-                                ledgerService.record(
-                                        TxType.TOPUP,
-                                        idempotencyKey,
-                                        List.of(
-                                                new LedgerLine(external, delta),
-                                                new LedgerLine(usage, -delta))));
+                        () -> ledgerService.record(TxType.TOPUP, idempotencyKey, lines));
 
-        // 4. 확인한다
         assertEquals(usage, e.getAccountId());
-        assertEquals(
-                0,
-                queryLong(
-                        "SELECT COUNT(*) FROM ledger_tx WHERE idempotency_key = ?",
-                        idempotencyKey));
+        assertEquals(0, countTxByKey(idempotencyKey));
         assertEquals(externalBefore, balance(external));
         assertEquals(usageBefore, balance(usage));
     }
 
     @Test
     void 같은_멱등_키로_두_번_기록하면_기록을_생략하고_반환한다() {
-        // 1. EXTERNAL, USAGE 계정 번호를 조회한다
-        long external = systemAccountId("EXTERNAL");
-        long usage = systemAccountId("USAGE");
 
-        // 2. 기록 전 두 계정의 잔액을 읽어 둔다
-        long externalBefore = balance(external);
-        long usageBefore = balance(usage);
+        String idempotencyKey = newKey();
 
-        String idempotencyKey = "test-" + UUID.randomUUID();
-        // 3. EXTERNAL -1000, USAGE +1000 거래를 기록한다
-        long txId =
-                ledgerService.record(
-                        TxType.TOPUP,
-                        idempotencyKey,
-                        List.of(new LedgerLine(external, -1000L), new LedgerLine(usage, 1000L)));
+        long txId = ledgerService.record(TxType.TOPUP, idempotencyKey, externalToUsage(1_000L));
+        long txId2 = ledgerService.record(TxType.TOPUP, idempotencyKey, externalToUsage(1_000L));
 
-        long txId2 =
-                ledgerService.record(
-                        TxType.TOPUP,
-                        idempotencyKey,
-                        List.of(new LedgerLine(external, -1000L), new LedgerLine(usage, 1000L)));
-
-        // 4. 확인한다
-        assertEquals(
-                1,
-                queryLong(
-                        "SELECT COUNT(*) FROM ledger_tx WHERE idempotency_key = ?",
-                        idempotencyKey));
         assertEquals(txId, txId2);
+        assertEquals(1, countTxByKey(idempotencyKey));
         assertEquals(externalBefore - 1000, balance(external));
         assertEquals(usageBefore + 1000, balance(usage));
     }
 
     @Test
     void 두_스레드가_반대_순서로_거래를_업데이트해도_실패하지_않는다() throws Exception {
-        long external = systemAccountId("EXTERNAL");
-        long usage = systemAccountId("USAGE");
-        long externalBefore = balance(external);
-        long usageBefore = balance(usage);
-        List<LedgerLine> lines =
-                List.of(new LedgerLine(external, -1000), new LedgerLine(usage, 1000));
+        int rounds = 50;
+        long amount = 1_000L;
+        List<LedgerLine> lines = externalToUsage(amount);
         List<LedgerLine> reversed = new ArrayList<>(lines).reversed();
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
         List<Throwable> failures = new ArrayList<>();
 
         try {
-            for (int i = 0; i < 50; i++) {
+            for (int i = 0; i < rounds; i++) {
                 CountDownLatch start = new CountDownLatch(1);
 
                 Future<Void> first =
                         pool.submit(() -> {
                             start.await();
-                            ledgerService.record(
-                                    TxType.TOPUP, String.valueOf(UUID.randomUUID()), lines);
+                            ledgerService.record(TxType.TOPUP, newKey(), lines);
                             return null;
                         });
 
                 Future<Void> second =
                         pool.submit(() -> {
                             start.await();
-                            ledgerService.record(
-                                    TxType.TOPUP, String.valueOf(UUID.randomUUID()), reversed);
+                            ledgerService.record(TxType.TOPUP, newKey(), reversed);
                             return null;
                         });
 
@@ -165,12 +123,25 @@ public class LedgerServiceIntegrationTest {
             pool.shutdownNow();
         }
 
-        long externalAfter = balance(external);
-        long usageAfter = balance(usage);
-
+        long moved = rounds * 2 * amount;
         assertEquals(List.of(), failures);
-        assertEquals(externalBefore - 100000, externalAfter);
-        assertEquals(usageBefore + 100000, usageAfter);
+        assertEquals(externalBefore - moved, balance(external));
+        assertEquals(usageBefore + moved, balance(usage));
+    }
+
+    /** EXTERNAL에서 USAGE로 amountMicros만큼 옮기는 줄 두 개. */
+    private List<LedgerLine> externalToUsage(long amountMicros) {
+        return List.of(
+                new LedgerLine(external, -amountMicros), new LedgerLine(usage, amountMicros));
+    }
+
+    private String newKey() {
+        return "test-" + UUID.randomUUID();
+    }
+
+    private long countTxByKey(String idempotencyKey) {
+        return queryLong(
+                "SELECT COUNT(*) FROM ledger_tx WHERE idempotency_key = ?", idempotencyKey);
     }
 
     private long balance(long accountId) {
