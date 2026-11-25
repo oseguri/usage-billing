@@ -7,6 +7,8 @@ import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class LedgerServiceTest {
 
@@ -20,6 +22,17 @@ class LedgerServiceTest {
                         IllegalArgumentException.class,
                         () -> service.record(TxType.TOPUP, "key-1", lines));
         assertTrue(e.getMessage().contains(expectedMessage));
+    }
+
+    @ParameterizedTest(name = "[{index}] 멱등키가 \"{0}\"일 때 IllegalArgumentException 발생")
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "  ", "\t", "\n"})
+    void 키가_null_이거나_비어_있으면_예외가_발생한다(String idempotencyKey) {
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> service.record(TxType.TOPUP, idempotencyKey, null));
+        assertTrue(e.getMessage().contains("잘못된 멱등키 입니다."));
     }
 
     static Stream<Arguments> invalidLines() {
